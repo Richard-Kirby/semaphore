@@ -7,6 +7,7 @@ import sys
 import subprocess
 import queue
 import os
+import json
 
 """
 This bit just gets the pigpiod daemon up and running if it isn't already.
@@ -21,6 +22,30 @@ if len(out.strip()) == 0:
 
 pi = pigpio.pi()
 
+
+# Manages the code to angles translation.
+class SemaphoreCodes:
+
+    def __init__(self):
+        with open('semaphore_codes.json') as json_semaphore_codes:
+            self.codes = json.load(json_semaphore_codes)
+
+        for code in self.codes["semaphore_codes"]:
+            print(code["code"], code["left"], code["right"])
+
+    # Returns the flag angles required for each letter.
+    def return_flag_angles(self, code):
+
+        # TO_DO: can't find the word codes
+        ret_code = None
+        for array_member in self.codes["semaphore_codes"]:
+            #print(array_member['code'])
+            if array_member['code'] is code:
+                ret_code = (array_member["left"], array_member["right"])
+                break # break out of for loop - found it
+        return ret_code
+
+# Sets up a Servo and drives it as requested.
 class Servo:
 
     def __init__(self, pwm_pin, low_duty, high_duty):
@@ -28,6 +53,7 @@ class Servo:
         self.low_duty = low_duty
         self.high_duty = high_duty
 
+    # Drives the servo to a certain angle, including dealing with negative angles.
     def set_angle(self, angle):
 
         if angle < 0:
@@ -37,7 +63,7 @@ class Servo:
         else:
             servo_pulse = int((float(angle / 180) * (self.high_duty - self.low_duty)) + self.low_duty)
 
-        print(angle, servo_pulse)
+        #print(angle, servo_pulse)
         pi.set_servo_pulsewidth(self.pwm_pin, int(servo_pulse))
 
 
@@ -50,6 +76,20 @@ class SemaphoreFlagger(threading.Thread):
         self.right_servo = right_servo
         self.pause_time = pause_time
         self.cmd_queue = queue.Queue()
+        self.semaphore_codes = SemaphoreCodes()
+
+    # calculates the physical angles to use - Left is negative as the servo is inverted
+    @staticmethod
+    def get_physical_angles(angles):
+
+        # Left is made negative as the servo is inverted.  0 doesn't work as -1 *0 = 0, so set to -1
+        if angles[0] is 0:
+            ret_code = (- 1, angles[1])
+        else:
+            ret_code = (- 1* angles[0], angles[1])
+
+        return ret_code
+
 
     def run(self):
 
@@ -57,13 +97,38 @@ class SemaphoreFlagger(threading.Thread):
 
             while True:
 
+                # If Queue isn't empty, deal with the string by processing each letter.
                 if not self.cmd_queue.empty():
-                    left_angle, right_angle = self.cmd_queue.get_nowait()
+
+                    # Get the string
+                    string = self.cmd_queue.get_nowait()
+                    print(string)
+
+                    # Processing each letter.
+                    for i in string.upper():
+                        left_angle=0
+                        right_angle =0
+                        ret_code =self.semaphore_codes.return_flag_angles(i)
+                        if ret_code is not None:
+
+                            ret_code = self.get_physical_angles(ret_code)
+                            left_angle = ret_code[0]
+                            right_angle = ret_code[1]
+                            print(i, "LR", left_angle, right_angle)
+
+                            self.left_servo.set_angle(left_angle)
+                            self.right_servo.set_angle(right_angle)
+                            time.sleep(self.pause_time)
+
+                    # Need to finish off each string with a rest.  A space is the same as a rest.
+                    ret_code = self.get_physical_angles(self.semaphore_codes.return_flag_angles(' '))
+                    left_angle = ret_code[0]
+                    right_angle = ret_code[1]
+                    print(i, "LR", left_angle, right_angle)
 
                     self.left_servo.set_angle(left_angle)
                     self.right_servo.set_angle(right_angle)
-
-                    print(left_angle, right_angle)
+                    time.sleep(self.pause_time)
 
                 time.sleep(self.pause_time)
 
@@ -76,29 +141,19 @@ class SemaphoreFlagger(threading.Thread):
 
 if __name__ == "__main__":
 
+    # Create some servo objects
     left_servo = Servo(27, 500, 2500)
     right_servo = Servo(9, 500, 2500)
 
-    semaphore_flagger = SemaphoreFlagger(left_servo, right_servo, 0.6)
-
+    # Set up the Semaphore flagger and start the thread.
+    semaphore_flagger = SemaphoreFlagger(left_servo, right_servo, 0.7)
     semaphore_flagger.start()
-
-
-    print("home")
-    semaphore_flagger.cmd_queue.put_nowait((0,0))
-    time.sleep(5)
-
 
     try:
         while True:
 
-            semaphore_flagger.cmd_queue.put_nowait((-1, 0))
-            semaphore_flagger.cmd_queue.put_nowait((-30, 30))
-            semaphore_flagger.cmd_queue.put_nowait((-90, 90))
-            semaphore_flagger.cmd_queue.put_nowait((-120, 120))
-            semaphore_flagger.cmd_queue.put_nowait((-180, 180))
-
-            print("start")
+            semaphore_flagger.cmd_queue.put_nowait("BU")
+            semaphore_flagger.cmd_queue.put_nowait("test for flagger")
             time.sleep(1)
 
 
