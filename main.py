@@ -26,6 +26,7 @@ pi = pigpio.pi()
 # Manages the code to angles translation.
 class SemaphoreCodes:
 
+    # Reads all the codes from the file.
     def __init__(self):
         with open('semaphore_codes.json') as json_semaphore_codes:
             self.codes = json.load(json_semaphore_codes)
@@ -36,7 +37,7 @@ class SemaphoreCodes:
     # Returns the flag angles required for each letter.
     def return_flag_angles(self, code):
 
-        # TO_DO: can't find the word codes
+        # TO_DO: can't find the word codes, individual letters works OK.
         ret_code = None
         for array_member in self.codes["semaphore_codes"]:
             #print(array_member['code'])
@@ -48,12 +49,14 @@ class SemaphoreCodes:
 # Sets up a Servo and drives it as requested.
 class Servo:
 
+    # Details of how to drive the servo.
     def __init__(self, pwm_pin, low_duty, high_duty):
         self.pwm_pin = pwm_pin
         self.low_duty = low_duty
         self.high_duty = high_duty
 
     # Drives the servo to a certain angle, including dealing with negative angles.
+    # The negative angles allows you to flip the motor over to get the required arc you want.
     def set_angle(self, angle):
 
         if angle < 0:
@@ -66,7 +69,7 @@ class Servo:
         #print(angle, servo_pulse)
         pi.set_servo_pulsewidth(self.pwm_pin, int(servo_pulse))
 
-
+# The flagger, which translates words into flag movements.  Monitors a queue of what needs to be sent.
 class SemaphoreFlagger(threading.Thread):
 
     def __init__(self, left_servo, right_servo, pause_time):
@@ -90,7 +93,8 @@ class SemaphoreFlagger(threading.Thread):
 
         return ret_code
 
-
+    # This is the over-ridden function for the running of the thread.  It just looks for things to pop up
+    # in its queue and gets the angles set accordingly.
     def run(self):
 
         try:
@@ -106,8 +110,6 @@ class SemaphoreFlagger(threading.Thread):
 
                     # Processing each letter.
                     for i in string.upper():
-                        left_angle=0
-                        right_angle =0
                         ret_code =self.semaphore_codes.return_flag_angles(i)
                         if ret_code is not None:
 
@@ -124,7 +126,7 @@ class SemaphoreFlagger(threading.Thread):
                     ret_code = self.get_physical_angles(self.semaphore_codes.return_flag_angles(' '))
                     left_angle = ret_code[0]
                     right_angle = ret_code[1]
-                    print(i, "LR", left_angle, right_angle)
+                    print("rest", "LR", left_angle, right_angle)
 
                     self.left_servo.set_angle(left_angle)
                     self.right_servo.set_angle(right_angle)
@@ -147,17 +149,21 @@ if __name__ == "__main__":
 
     # Set up the Semaphore flagger and start the thread.
     semaphore_flagger = SemaphoreFlagger(left_servo, right_servo, 0.7)
+    semaphore_flagger.daemon = True
     semaphore_flagger.start()
 
     try:
         while True:
 
             semaphore_flagger.cmd_queue.put_nowait("BU")
-            semaphore_flagger.cmd_queue.put_nowait("test for flagger")
+            semaphore_flagger.cmd_queue.put_nowait("This is utter bullshit")
+            semaphore_flagger.cmd_queue.put_nowait("abcdefghijklmnopqrstuvxyz0123456789")
+
             time.sleep(1)
 
 
     except KeyboardInterrupt:
+
         print("Quitting the program due to Ctrl-C")
 
     except:
